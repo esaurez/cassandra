@@ -450,6 +450,11 @@ public class Config
      */
     public volatile boolean report_unconfirmed_repaired_data_mismatches = false;
 
+    //
+    public int num_optional_outbound_channels = 0;
+
+    public String optional_outbound_channels_strategy = "DISABLE";
+
     /**
      * @deprecated migrate to {@link DatabaseDescriptor#isClientInitialized()}
      */
