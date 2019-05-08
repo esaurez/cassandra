@@ -801,7 +801,19 @@ public class DatabaseDescriptor
         if (conf.otc_coalescing_enough_coalesced_messages <= 0)
             throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be positive", false);
 
+        if (conf.num_optional_outbound_channels < 0||conf.num_optional_outbound_channels > 26)
+            throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be bigger than zero and " +
+                                             "smaller than 27", false);
+
+        if (!validOutboundChannelStrategy(conf.optional_outbound_channels_strategy))
+            throw new ConfigurationException("used optional_outbound_channels_strategy is invalid", false);
+
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
+    }
+
+    private static boolean validOutboundChannelStrategy(String strategy){
+       return (strategy.equalsIgnoreCase("FIXED_WINDOW"))||(strategy.equalsIgnoreCase("DEFAULT"))||
+              (strategy.equalsIgnoreCase("DISABLED"));
     }
 
     private static String storagedirFor(String type)
@@ -2815,4 +2827,24 @@ public class DatabaseDescriptor
     {
         return strictRuntimeChecks;
     }
+    public static int getNumOptionalOutboundChannels()
+    {
+        return conf.num_optional_outbound_channels;
+    }
+
+    public static void setNumOptionalOutboundChannels(int numOptionalOutboundChannels)
+    {
+        conf.num_optional_outbound_channels = numOptionalOutboundChannels;
+    }
+
+    public static String getOptionalOutboundChannelsStrategy()
+    {
+        return conf.optional_outbound_channels_strategy;
+    }
+
+    public static void setOptionalOutboundChannelsStrategy(String optionalOutboundChannelsStrategy)
+    {
+        conf.optional_outbound_channels_strategy = optionalOutboundChannelsStrategy;
+    }
+
 }

@@ -33,7 +33,11 @@ public class OutboundConnectionIdentifier
 {
     public enum ConnectionType
     {
-        GOSSIP (0), LARGE_MESSAGE (1), SMALL_MESSAGE (2), STREAM (3);
+        GOSSIP (0), LARGE_MESSAGE (1), SMALL_MESSAGE (2), STREAM (3), OPTIONAL_0(4),OPTIONAL_1(5),OPTIONAL_2(6),
+        OPTIONAL_3(7),OPTIONAL_4(8),OPTIONAL_5(9),OPTIONAL_6(10),OPTIONAL_7(11),OPTIONAL_8(12),OPTIONAL_9(13),
+        OPTIONAL_10(14),OPTIONAL_11(15),OPTIONAL_12(16),OPTIONAL_13(17),OPTIONAL_14(18),OPTIONAL_15(19),OPTIONAL_16(20),
+        OPTIONAL_17(21),OPTIONAL_18(22),OPTIONAL_19(23),OPTIONAL_20(24),OPTIONAL_21(25),OPTIONAL_22(26),OPTIONAL_23(27),
+        OPTIONAL_24(28),OPTIONAL_25(29);
 
         private final int id;
 
@@ -131,6 +135,10 @@ public class OutboundConnectionIdentifier
     public static OutboundConnectionIdentifier stream(InetAddressAndPort localAddr, InetAddressAndPort remoteAddr)
     {
         return new OutboundConnectionIdentifier(localAddr, remoteAddr, ConnectionType.STREAM);
+    }
+
+    public static OutboundConnectionIdentifier optional(int index, InetAddressAndPort localAddr, InetAddressAndPort remoteAddr){
+        return new OutboundConnectionIdentifier(localAddr, remoteAddr, ConnectionType.fromId(index+4));
     }
 
     /**

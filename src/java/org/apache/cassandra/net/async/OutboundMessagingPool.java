@@ -18,7 +18,10 @@
 
 package org.apache.cassandra.net.async;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -47,10 +50,21 @@ public class OutboundMessagingPool
 
     private final ConnectionMetrics metrics;
     private final BackPressureState backPressureState;
+    //Optional strategy
+
+    private final int coalescingWindowMs = DatabaseDescriptor.getOtcCoalescingWindow()*90/(100*1000);
+    private final int numOptionalOutboundChannels = DatabaseDescriptor.getNumOptionalOutboundChannels();
+    private final String optionalOutboundChannelsStrategy = DatabaseDescriptor.getOptionalOutboundChannelsStrategy();
+    private final AtomicInteger nextIndexToUse;
+    private Long lastIndexChangeInNs;
+    private final boolean optionalDisabled;
+
+
 
     public OutboundMessagingConnection gossipChannel;
     public OutboundMessagingConnection largeMessageChannel;
     public OutboundMessagingConnection smallMessageChannel;
+    public List<OutboundMessagingConnection> optionalChannels;
 
     /**
      * An override address on which to communicate with the peer. Typically used for something like EC2 public IP addresses
@@ -74,6 +88,27 @@ public class OutboundMessagingPool
         // don't attempt coalesce the gossip messages, just ship them out asap (let's not anger the FD on any peer node by any artificial delays)
         gossipChannel = new OutboundMessagingConnection(OutboundConnectionIdentifier.gossip(localAddr, preferredRemoteAddr),
                                                         encryptionOptions, Optional.empty(), authenticator);
+
+        //Optional strategy
+        if(!optionalOutboundChannelsStrategy.equalsIgnoreCase("DISABLED"))
+        {
+            optionalDisabled=false;
+            nextIndexToUse = new AtomicInteger(0);
+            lastIndexChangeInNs = System.nanoTime();
+            optionalChannels = new ArrayList<>();
+            for (int index = 0; index < numOptionalOutboundChannels; index++)
+            {
+                optionalChannels.add(
+                new OutboundMessagingConnection(OutboundConnectionIdentifier.optional(index, localAddr, preferredRemoteAddr),
+                                                encryptionOptions, coalescingStrategy(remoteAddr), authenticator)
+                );
+            }
+        }
+        else{
+            optionalDisabled=true;
+            nextIndexToUse=null;
+            lastIndexChangeInNs=null;
+        }
     }
 
     private static Optional<CoalescingStrategy> coalescingStrategy(InetAddressAndPort remoteAddr)
@@ -97,6 +132,39 @@ public class OutboundMessagingPool
         getConnection(msg).sendMessage(msg, id);
     }
 
+    private OutboundMessagingConnection getOutboundSmallChannel(int index){
+        if(index==0) return smallMessageChannel;
+        index--;
+        return optionalChannels.get(index);
+    }
+
+    private int getModuloIndex(int counter){
+        return counter%(numOptionalOutboundChannels+1);
+    }
+
+    private OutboundMessagingConnection fixedWindowStrategy(){
+        long currentNs = System.nanoTime();
+        int moduloIdx=-1;
+        synchronized(lastIndexChangeInNs){
+            long diffMs = (currentNs - lastIndexChangeInNs)/(1000000);
+            if(diffMs >= coalescingWindowMs){
+                int currentIdx = nextIndexToUse.getAndIncrement();
+                moduloIdx= getModuloIndex(currentIdx);
+                lastIndexChangeInNs=currentNs;
+            }
+            else{
+                moduloIdx=getModuloIndex(nextIndexToUse.get());
+            }
+        }
+        return getOutboundSmallChannel(moduloIdx);
+    }
+
+    private OutboundMessagingConnection automaticIncrementStrategy(){
+        int currentIdx = nextIndexToUse.getAndIncrement();
+        int moduloIdx= getModuloIndex(currentIdx);
+        return getOutboundSmallChannel(moduloIdx);
+    }
+
     @VisibleForTesting
     public OutboundMessagingConnection getConnection(MessageOut msg)
     {
@@ -105,9 +173,26 @@ public class OutboundMessagingPool
             // optimize for the common path (the small message channel)
             if (Stage.GOSSIP != msg.getStage())
             {
-                return msg.serializedSize(smallMessageChannel.getTargetVersion()) < LARGE_MESSAGE_THRESHOLD
-                       ? smallMessageChannel
-                       : largeMessageChannel;
+                if(msg.serializedSize(smallMessageChannel.getTargetVersion()) < LARGE_MESSAGE_THRESHOLD){
+                    //This is a small channel
+                    if(optionalDisabled){
+                        return smallMessageChannel;
+                    }
+                    else if(numOptionalOutboundChannels<=0)
+                    {
+                        return smallMessageChannel;
+                    }
+
+                    if(optionalOutboundChannelsStrategy.equalsIgnoreCase("FIXED_WINDOW")){
+                        return fixedWindowStrategy();
+                    }
+                    else{
+                        return automaticIncrementStrategy();
+                    }
+                }
+                else{
+                   return largeMessageChannel;
+                }
             }
             return gossipChannel;
         }
